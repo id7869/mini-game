@@ -1,0 +1,514 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>俄罗斯方块</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            margin: 0;
+            background-color: #f0f0f0;
+        }
+        
+        .game-container {
+            display: flex;
+            gap: 20px;
+        }
+        
+        canvas {
+            border: 2px solid #333;
+            background-color: #111;
+        }
+        
+        .sidebar {
+            width: 200px;
+            background-color: #333;
+            color: white;
+            padding: 20px;
+            box-sizing: border-box;
+        }
+        
+        .sidebar h2 {
+            margin-top: 0;
+            text-align: center;
+        }
+        
+        .info-item {
+            margin: 15px 0;
+        }
+        
+        .info-label {
+            font-weight: bold;
+        }
+        
+        .next-piece-preview {
+            width: 120px;
+            height: 120px;
+            margin: 10px auto;
+            background-color: #222;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+        
+        .controls {
+            margin-top: 30px;
+        }
+        
+        .controls h3 {
+            margin-bottom: 10px;
+        }
+        
+        .controls ul {
+            padding-left: 20px;
+            margin-top: 0;
+        }
+        
+        .controls li {
+            margin: 5px 0;
+        }
+        
+        .game-over {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background-color: rgba(0, 0, 0, 0.8);
+            color: red;
+            font-size: 36px;
+            padding: 20px;
+            border-radius: 10px;
+            display: none;
+        }
+    </style>
+</head>
+<body>
+    <div class="game-container">
+        <canvas id="gameCanvas" width="300" height="600"></canvas>
+        <div class="sidebar">
+            <h2>俄罗斯方块</h2>
+            <div class="info-item">
+                <div class="info-label">分数:</div>
+                <div id="score">0</div>
+            </div>
+            <div class="info-item">
+                <div class="info-label">等级:</div>
+                <div id="level">1</div>
+            </div>
+            <div class="info-item">
+                <div class="info-label">行数:</div>
+                <div id="lines">0</div>
+            </div>
+            <div class="info-item">
+                <div class="info-label">速度:</div>
+                <div id="speed">1</div>
+            </div>
+            <div class="info-item">
+                <div class="info-label">下一个:</div>
+                <div class="next-piece-preview">
+                    <canvas id="nextPieceCanvas" width="120" height="120"></canvas>
+                </div>
+            </div>
+            <div class="controls">
+                <h3>控制说明:</h3>
+                <ul>
+                    <li>← → : 移动</li>
+                    <li>↑ : 旋转</li>
+                    <li>↓ : 软降</li>
+                    <li>空格 : 硬降</li>
+                    <li>+/- : 调节速度</li>
+                </ul>
+            </div>
+        </div>
+    </div>
+    <div id="gameOver" class="game-over">游戏结束!</div>
+
+    <script>
+        // 常量设置
+        const SCREEN_WIDTH = 800;
+        const SCREEN_HEIGHT = 600;
+        const GRID_SIZE = 30;
+        const GRID_WIDTH = 10;
+        const GRID_HEIGHT = 20;
+        const SIDEBAR_WIDTH = 200;
+
+        // 颜色定义
+        const COLORS = {
+            BLACK: "#000000",
+            WHITE: "#FFFFFF",
+            RED: "#FF0000",
+            GREEN: "#00FF00",
+            BLUE: "#0000FF",
+            CYAN: "#00FFFF",
+            MAGENTA: "#FF00FF",
+            YELLOW: "#FFFF00",
+            ORANGE: "#FFA500",
+            GRAY: "#808080",
+            DARK_GRAY: "#323232"
+        };
+
+        // 方块形状定义
+        const SHAPES = [
+            [[1, 1, 1, 1]],  // I
+            [[1, 1], [1, 1]],  // O
+            [[0, 1, 0], [1, 1, 1]],  // T
+            [[0, 1, 1], [1, 1, 0]],  // S
+            [[1, 1, 0], [0, 1, 1]],  // Z
+            [[1, 0, 0], [1, 1, 1]],  // J
+            [[0, 0, 1], [1, 1, 1]]   // L
+        ];
+
+        // 方块颜色
+        const SHAPE_COLORS = [COLORS.CYAN, COLORS.YELLOW, COLORS.MAGENTA, COLORS.GREEN, COLORS.RED, COLORS.BLUE, COLORS.ORANGE];
+
+        class Tetromino {
+            constructor(x, y) {
+                this.x = x;
+                this.y = y;
+                this.shapeIdx = Math.floor(Math.random() * SHAPES.length);
+                this.shape = SHAPES[this.shapeIdx];
+                this.color = SHAPE_COLORS[this.shapeIdx];
+                this.rotation = 0;
+            }
+
+            rotate() {
+                // 转置矩阵实现旋转
+                const rows = this.shape.length;
+                const cols = this.shape[0].length;
+                const rotated = Array(cols).fill().map(() => Array(rows).fill(0));
+                
+                for (let r = 0; r < rows; r++) {
+                    for (let c = 0; c < cols; c++) {
+                        rotated[c][rows - 1 - r] = this.shape[r][c];
+                    }
+                }
+                
+                return rotated;
+            }
+        }
+
+        class TetrisGame {
+            constructor() {
+                this.canvas = document.getElementById('gameCanvas');
+                this.ctx = this.canvas.getContext('2d');
+                this.nextPieceCanvas = document.getElementById('nextPieceCanvas');
+                this.nextPieceCtx = this.nextPieceCanvas.getContext('2d');
+                
+                this.resetGame();
+                
+                // 设置键盘事件监听器
+                this.setupEventListeners();
+                
+                // 开始游戏循环
+                this.lastTime = performance.now();
+                this.gameLoop();
+            }
+            
+            resetGame() {
+                this.grid = Array(GRID_HEIGHT).fill().map(() => Array(GRID_WIDTH).fill(0));
+                this.currentPiece = this.newPiece();
+                this.nextPiece = this.newPiece();
+                this.gameOver = false;
+                this.score = 0;
+                this.level = 1;
+                this.linesCleared = 0;
+                this.baseFallSpeed = 500;  // 基础下降速度(毫秒)
+                this.fallSpeed = this.baseFallSpeed;  // 当前下降速度
+                this.fallTime = 0;
+                this.speedLevel = 1;  // 速度等级(1-10)
+                
+                document.getElementById('gameOver').style.display = 'none';
+                this.updateInfo();
+            }
+            
+            newPiece() {
+                return new Tetromino(Math.floor(GRID_WIDTH / 2) - 1, 0);
+            }
+            
+            validPosition(piece, x, y, shape = null) {
+                const shapeToCheck = shape || piece.shape;
+                
+                for (let r = 0; r < shapeToCheck.length; r++) {
+                    for (let c = 0; c < shapeToCheck[r].length; c++) {
+                        if (shapeToCheck[r][c]) {
+                            const posX = x + c;
+                            const posY = y + r;
+                            // 检查边界
+                            if (posX < 0 || posX >= GRID_WIDTH || posY >= GRID_HEIGHT) {
+                                return false;
+                            }
+                            // 检查是否与已放置的方块重叠
+                            if (posY >= 0 && this.grid[posY][posX]) {
+                                return false;
+                            }
+                        }
+                    }
+                }
+                return true;
+            }
+            
+            mergePiece() {
+                for (let r = 0; r < this.currentPiece.shape.length; r++) {
+                    for (let c = 0; c < this.currentPiece.shape[r].length; c++) {
+                        if (this.currentPiece.shape[r][c]) {
+                            const posY = this.currentPiece.y + r;
+                            const posX = this.currentPiece.x + c;
+                            if (posY >= 0) {  // 只合并可见区域内的方块
+                                this.grid[posY][posX] = this.currentPiece.color;
+                            }
+                        }
+                    }
+                }
+            }
+            
+            clearLines() {
+                const linesToClear = [];
+                for (let r = 0; r < GRID_HEIGHT; r++) {
+                    if (this.grid[r].every(cell => cell !== 0)) {
+                        linesToClear.push(r);
+                    }
+                }
+                
+                for (const line of linesToClear) {
+                    this.grid.splice(line, 1);
+                    this.grid.unshift(Array(GRID_WIDTH).fill(0));
+                }
+                
+                // 更新分数
+                if (linesToClear.length > 0) {
+                    this.linesCleared += linesToClear.length;
+                    const linePoints = [100, 300, 500, 800];
+                    this.score += linePoints[Math.min(linesToClear.length - 1, 3)] * this.level;
+                    this.level = Math.floor(this.linesCleared / 10) + 1;
+                }
+                
+                return linesToClear.length;
+            }
+            
+            adjustSpeed(delta) {
+                /** 调整下降速度 */
+                this.speedLevel = Math.max(1, Math.min(10, this.speedLevel + delta));
+                // 速度计算：基础速度 * (11 - 速度等级) / 10
+                // 速度等级越高，下降速度越快
+                this.fallSpeed = this.baseFallSpeed * (11 - this.speedLevel) / 10;
+                // 确保最小速度
+                this.fallSpeed = Math.max(50, this.fallSpeed);
+                this.updateInfo();
+            }
+            
+            move(dx, dy) {
+                if (!this.gameOver) {
+                    if (this.validPosition(this.currentPiece, this.currentPiece.x + dx, this.currentPiece.y + dy)) {
+                        this.currentPiece.x += dx;
+                        this.currentPiece.y += dy;
+                        return true;
+                    }
+                }
+                return false;
+            }
+            
+            rotatePiece() {
+                if (!this.gameOver) {
+                    const rotatedShape = this.currentPiece.rotate();
+                    if (this.validPosition(this.currentPiece, this.currentPiece.x, this.currentPiece.y, rotatedShape)) {
+                        this.currentPiece.shape = rotatedShape;
+                        return true;
+                    }
+                }
+                return false;
+            }
+            
+            drop() {
+                if (!this.gameOver) {
+                    while (this.move(0, 1)) {
+                        // 继续下降
+                    }
+                    this.lockPiece();
+                }
+            }
+            
+            lockPiece() {
+                this.mergePiece();
+                this.clearLines();
+                this.currentPiece = this.nextPiece;
+                this.nextPiece = this.newPiece();
+                this.updateInfo();
+                
+                // 检查游戏结束
+                if (!this.validPosition(this.currentPiece, this.currentPiece.x, this.currentPiece.y)) {
+                    this.gameOver = true;
+                    document.getElementById('gameOver').style.display = 'block';
+                }
+            }
+            
+            drawGrid() {
+                // 绘制游戏区域背景
+                this.ctx.fillStyle = COLORS.DARK_GRAY;
+                this.ctx.fillRect(0, 0, GRID_WIDTH * GRID_SIZE, GRID_HEIGHT * GRID_SIZE);
+                
+                // 绘制网格线
+                this.ctx.strokeStyle = COLORS.GRAY;
+                this.ctx.lineWidth = 1;
+                
+                for (let x = 0; x <= GRID_WIDTH; x++) {
+                    this.ctx.beginPath();
+                    this.ctx.moveTo(x * GRID_SIZE, 0);
+                    this.ctx.lineTo(x * GRID_SIZE, GRID_HEIGHT * GRID_SIZE);
+                    this.ctx.stroke();
+                }
+                
+                for (let y = 0; y <= GRID_HEIGHT; y++) {
+                    this.ctx.beginPath();
+                    this.ctx.moveTo(0, y * GRID_SIZE);
+                    this.ctx.lineTo(GRID_WIDTH * GRID_SIZE, y * GRID_SIZE);
+                    this.ctx.stroke();
+                }
+                
+                // 绘制已放置的方块
+                for (let r = 0; r < GRID_HEIGHT; r++) {
+                    for (let c = 0; c < GRID_WIDTH; c++) {
+                        if (this.grid[r][c]) {
+                            this.ctx.fillStyle = this.grid[r][c];
+                            this.ctx.fillRect(c * GRID_SIZE, r * GRID_SIZE, GRID_SIZE, GRID_SIZE);
+                            this.ctx.strokeStyle = COLORS.WHITE;
+                            this.ctx.lineWidth = 1;
+                            this.ctx.strokeRect(c * GRID_SIZE, r * GRID_SIZE, GRID_SIZE, GRID_SIZE);
+                        }
+                    }
+                }
+                
+                // 绘制当前方块
+                if (!this.gameOver) {
+                    for (let r = 0; r < this.currentPiece.shape.length; r++) {
+                        for (let c = 0; c < this.currentPiece.shape[r].length; c++) {
+                            if (this.currentPiece.shape[r][c]) {
+                                this.ctx.fillStyle = this.currentPiece.color;
+                                this.ctx.fillRect(
+                                    (this.currentPiece.x + c) * GRID_SIZE, 
+                                    (this.currentPiece.y + r) * GRID_SIZE, 
+                                    GRID_SIZE, 
+                                    GRID_SIZE
+                                );
+                                this.ctx.strokeStyle = COLORS.WHITE;
+                                this.ctx.lineWidth = 1;
+                                this.ctx.strokeRect(
+                                    (this.currentPiece.x + c) * GRID_SIZE, 
+                                    (this.currentPiece.y + r) * GRID_SIZE, 
+                                    GRID_SIZE, 
+                                    GRID_SIZE
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+            
+            drawNextPiece() {
+                // 清空预览画布
+                this.nextPieceCtx.clearRect(0, 0, this.nextPieceCanvas.width, this.nextPieceCanvas.height);
+                
+                // 计算居中位置
+                const offsetX = (this.nextPieceCanvas.width - this.nextPiece.shape[0].length * GRID_SIZE) / 2;
+                const offsetY = (this.nextPieceCanvas.height - this.nextPiece.shape.length * GRID_SIZE) / 2;
+                
+                // 绘制下一个方块
+                for (let r = 0; r < this.nextPiece.shape.length; r++) {
+                    for (let c = 0; c < this.nextPiece.shape[r].length; c++) {
+                        if (this.nextPiece.shape[r][c]) {
+                            this.nextPieceCtx.fillStyle = this.nextPiece.color;
+                            this.nextPieceCtx.fillRect(
+                                offsetX + c * GRID_SIZE, 
+                                offsetY + r * GRID_SIZE, 
+                                GRID_SIZE, 
+                                GRID_SIZE
+                            );
+                            this.nextPieceCtx.strokeStyle = COLORS.WHITE;
+                            this.nextPieceCtx.lineWidth = 1;
+                            this.nextPieceCtx.strokeRect(
+                                offsetX + c * GRID_SIZE, 
+                                offsetY + r * GRID_SIZE, 
+                                GRID_SIZE, 
+                                GRID_SIZE
+                            );
+                        }
+                    }
+                }
+            }
+            
+            updateInfo() {
+                document.getElementById('score').textContent = this.score;
+                document.getElementById('level').textContent = this.level;
+                document.getElementById('lines').textContent = this.linesCleared;
+                document.getElementById('speed').textContent = this.speedLevel;
+                this.drawNextPiece();
+            }
+            
+            setupEventListeners() {
+                document.addEventListener('keydown', (event) => {
+                    // 速度调节控制
+                    if (event.key === '+' || event.key === '=') {
+                        this.adjustSpeed(1);  // 增加速度等级
+                        event.preventDefault();
+                    } else if (event.key === '-') {
+                        this.adjustSpeed(-1);  // 减少速度等级
+                        event.preventDefault();
+                    }
+                    
+                    if (!this.gameOver) {
+                        if (event.key === 'ArrowLeft') {
+                            this.move(-1, 0);
+                            event.preventDefault();
+                        } else if (event.key === 'ArrowRight') {
+                            this.move(1, 0);
+                            event.preventDefault();
+                        } else if (event.key === 'ArrowDown') {
+                            this.move(0, 1);
+                            event.preventDefault();
+                        } else if (event.key === 'ArrowUp') {
+                            this.rotatePiece();
+                            event.preventDefault();
+                        } else if (event.key === ' ') {
+                            this.drop();
+                            event.preventDefault();
+                        }
+                    }
+                });
+            }
+            
+            update(deltaTime) {
+                // 自然下落
+                if (!this.gameOver) {
+                    this.fallTime += deltaTime;
+                    if (this.fallTime >= this.fallSpeed) {
+                        if (!this.move(0, 1)) {
+                            this.lockPiece();
+                        }
+                        this.fallTime = 0;
+                    }
+                }
+            }
+            
+            gameLoop() {
+                const currentTime = performance.now();
+                const deltaTime = currentTime - this.lastTime;
+                this.lastTime = currentTime;
+                
+                this.update(deltaTime);
+                this.drawGrid();
+                
+                requestAnimationFrame(() => this.gameLoop());
+            }
+        }
+
+        // 启动游戏
+        window.onload = () => {
+            const game = new TetrisGame();
+        };
+    </script>
+</body>
+</html>
